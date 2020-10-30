@@ -1,0 +1,4 @@
+usr/lib/llvm-@LLVM_VERSION@/lib/libc++.so
+usr/lib/llvm-@LLVM_VERSION@/lib/libc++.a
+usr/lib/llvm-@LLVM_VERSION@/include/c++/
+usr/lib/llvm-@LLVM_VERSION@/lib/libc++experimental.a

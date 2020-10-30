@@ -1,0 +1,137 @@
+Description: PowerPC/SPE: Fix register spilling for SPE registers
+Author: Justin Hibbits <jrh29@alumni.cwru.edu>
+Origin: https://reviews.llvm.org/D56703
+Last-Update: 2019-02-14
+
+--- llvm-toolchain-snapshot-9~svn351420.orig/lib/Target/PowerPC/PPCCallingConv.td
++++ llvm-toolchain-snapshot-9~svn351420/lib/Target/PowerPC/PPCCallingConv.td
+@@ -346,15 +346,22 @@ def CSR_NoRegs : CalleeSavedRegs<(add)>;
+ // and value may be altered by inter-library calls.
+ // Do not include r12 as it is used as a scratch register.
+ // Do not include return registers r3, f1, v2.
+-def CSR_SVR32_ColdCC : CalleeSavedRegs<(add (sequence "R%u", 4, 10),
+-                                          (sequence "R%u", 14, 31),
+-                                          F0, (sequence "F%u", 2, 31),
+-                                          (sequence "CR%u", 0, 7))>;
++def CSR_SVR32_ColdCC_Common : CalleeSavedRegs<(add (sequence "R%u", 4, 10),
++                                                (sequence "R%u", 14, 31),
++                                                (sequence "CR%u", 0, 7))>;
++
++def CSR_SVR32_ColdCC : CalleeSavedRegs<(add CSR_SVR32_ColdCC_Common,
++                                          F0, (sequence "F%u", 2, 31))>;
++
+ 
+ def CSR_SVR32_ColdCC_Altivec : CalleeSavedRegs<(add CSR_SVR32_ColdCC,
+                                             (sequence "V%u", 0, 1),
+                                             (sequence "V%u", 3, 31))>;
+ 
++def CSR_SVR32_ColdCC_SPE : CalleeSavedRegs<(add CSR_SVR32_ColdCC_Common,
++                                            (sequence "S%u", 4, 10),
++                                            (sequence "S%u", 14, 31))>;
++
+ def CSR_SVR64_ColdCC : CalleeSavedRegs<(add  (sequence "X%u", 4, 10),
+                                              (sequence "X%u", 14, 31),
+                                              F0, (sequence "F%u", 2, 31),
+--- llvm-toolchain-snapshot-9~svn351420.orig/lib/Target/PowerPC/PPCInstrInfo.cpp
++++ llvm-toolchain-snapshot-9~svn351420/lib/Target/PowerPC/PPCInstrInfo.cpp
+@@ -996,6 +996,8 @@ void PPCInstrInfo::copyPhysReg(MachineBa
+     Opc = PPC::QVFMRb;
+   else if (PPC::CRBITRCRegClass.contains(DestReg, SrcReg))
+     Opc = PPC::CROR;
++  else if (PPC::SPE4RCRegClass.contains(DestReg, SrcReg))
++    Opc = PPC::OR;
+   else if (PPC::SPERCRegClass.contains(DestReg, SrcReg))
+     Opc = PPC::EVOR;
+   else
+@@ -1026,10 +1028,10 @@ unsigned PPCInstrInfo::getStoreOpcodeFor
+       OpcodeIndex = SOK_Float8Spill;
+     } else if (PPC::F4RCRegClass.hasSubClassEq(RC)) {
+       OpcodeIndex = SOK_Float4Spill;
+-    } else if (PPC::SPERCRegClass.hasSubClassEq(RC)) {
+-      OpcodeIndex = SOK_SPESpill;
+     } else if (PPC::SPE4RCRegClass.hasSubClassEq(RC)) {
+       OpcodeIndex = SOK_SPE4Spill;
++    } else if (PPC::SPERCRegClass.hasSubClassEq(RC)) {
++      OpcodeIndex = SOK_SPESpill;
+     } else if (PPC::CRRCRegClass.hasSubClassEq(RC)) {
+       OpcodeIndex = SOK_CRSpill;
+     } else if (PPC::CRBITRCRegClass.hasSubClassEq(RC)) {
+@@ -1066,6 +1068,10 @@ unsigned PPCInstrInfo::getStoreOpcodeFor
+       OpcodeIndex = SOK_Float8Spill;
+     } else if (PPC::F4RCRegClass.contains(Reg)) {
+       OpcodeIndex = SOK_Float4Spill;
++    } else if (PPC::SPE4RCRegClass.contains(Reg)) {
++      OpcodeIndex = SOK_SPE4Spill;
++    } else if (PPC::SPERCRegClass.contains(Reg)) {
++      OpcodeIndex = SOK_SPESpill;
+     } else if (PPC::CRRCRegClass.contains(Reg)) {
+       OpcodeIndex = SOK_CRSpill;
+     } else if (PPC::CRBITRCRegClass.contains(Reg)) {
+@@ -1112,10 +1118,10 @@ PPCInstrInfo::getLoadOpcodeForSpill(unsi
+       OpcodeIndex = SOK_Float8Spill;
+     } else if (PPC::F4RCRegClass.hasSubClassEq(RC)) {
+       OpcodeIndex = SOK_Float4Spill;
+-    } else if (PPC::SPERCRegClass.hasSubClassEq(RC)) {
+-      OpcodeIndex = SOK_SPESpill;
+     } else if (PPC::SPE4RCRegClass.hasSubClassEq(RC)) {
+       OpcodeIndex = SOK_SPE4Spill;
++    } else if (PPC::SPERCRegClass.hasSubClassEq(RC)) {
++      OpcodeIndex = SOK_SPESpill;
+     } else if (PPC::CRRCRegClass.hasSubClassEq(RC)) {
+       OpcodeIndex = SOK_CRSpill;
+     } else if (PPC::CRBITRCRegClass.hasSubClassEq(RC)) {
+@@ -1152,6 +1158,10 @@ PPCInstrInfo::getLoadOpcodeForSpill(unsi
+       OpcodeIndex = SOK_Float8Spill;
+     } else if (PPC::F4RCRegClass.contains(Reg)) {
+       OpcodeIndex = SOK_Float4Spill;
++    } else if (PPC::SPE4RCRegClass.hasSubClassEq(RC)) {
++      OpcodeIndex = SOK_SPE4Spill;
++    } else if (PPC::SPERCRegClass.hasSubClassEq(RC)) {
++      OpcodeIndex = SOK_SPESpill;
+     } else if (PPC::CRRCRegClass.contains(Reg)) {
+       OpcodeIndex = SOK_CRSpill;
+     } else if (PPC::CRBITRCRegClass.contains(Reg)) {
+--- llvm-toolchain-snapshot-9~svn351420.orig/lib/Target/PowerPC/PPCRegisterInfo.cpp
++++ llvm-toolchain-snapshot-9~svn351420/lib/Target/PowerPC/PPCRegisterInfo.cpp
+@@ -167,7 +167,9 @@ PPCRegisterInfo::getCalleeSavedRegs(cons
+                       : (SaveR2 ? CSR_SVR64_ColdCC_R2_SaveList
+                                 : CSR_SVR64_ColdCC_SaveList))
+                : (Subtarget.hasAltivec() ? CSR_SVR32_ColdCC_Altivec_SaveList
+-                                         : CSR_SVR32_ColdCC_SaveList);
++                                         : (Subtarget.hasSPE()
++                                           ? CSR_SVR32_ColdCC_SPE_SaveList
++                                           : CSR_SVR32_ColdCC_SaveList));
+   }
+ 
+   return TM.isPPC64()
+@@ -176,7 +178,9 @@ PPCRegisterInfo::getCalleeSavedRegs(cons
+                               : CSR_SVR464_Altivec_SaveList)
+                     : (SaveR2 ? CSR_SVR464_R2_SaveList : CSR_SVR464_SaveList))
+              : (Subtarget.hasAltivec() ? CSR_SVR432_Altivec_SaveList
+-                                       : CSR_SVR432_SaveList);
++                                       : (Subtarget.hasSPE()
++                                         ? CSR_SVR432_SPE_SaveList
++                                         : CSR_SVR432_SaveList));
+ }
+ 
+ const MCPhysReg *
+@@ -226,13 +230,17 @@ PPCRegisterInfo::getCallPreservedMask(co
+     return TM.isPPC64() ? (Subtarget.hasAltivec() ? CSR_SVR64_ColdCC_Altivec_RegMask
+                                                   : CSR_SVR64_ColdCC_RegMask)
+                         : (Subtarget.hasAltivec() ? CSR_SVR32_ColdCC_Altivec_RegMask
+-                                                  : CSR_SVR32_ColdCC_RegMask);
++                                                  : (Subtarget.hasSPE()
++                                                  ? CSR_SVR32_ColdCC_SPE_RegMask
++                                                  : CSR_SVR32_ColdCC_RegMask));
+   }
+ 
+   return TM.isPPC64() ? (Subtarget.hasAltivec() ? CSR_SVR464_Altivec_RegMask
+                                                 : CSR_SVR464_RegMask)
+                       : (Subtarget.hasAltivec() ? CSR_SVR432_Altivec_RegMask
+-                                                : CSR_SVR432_RegMask);
++                                                : (Subtarget.hasSPE()
++                                                  ? CSR_SVR432_SPE_RegMask
++                                                  : CSR_SVR432_RegMask));
+ }
+ 
+ const uint32_t*

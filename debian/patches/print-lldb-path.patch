@@ -1,0 +1,16 @@
+Author: Gianfranco Costamagna <locutusofborg@debian.org>
+Last-Update: 2020-01-21
+
+Index: llvm-toolchain-snapshot_11~++20200708031542+64363a9d930/lldb/source/Plugins/ScriptInterpreter/Python/ScriptInterpreterPython.cpp
+===================================================================
+--- llvm-toolchain-snapshot_11~++20200708031542+64363a9d930.orig/lldb/source/Plugins/ScriptInterpreter/Python/ScriptInterpreterPython.cpp
++++ llvm-toolchain-snapshot_11~++20200708031542+64363a9d930/lldb/source/Plugins/ScriptInterpreter/Python/ScriptInterpreterPython.cpp
+@@ -365,6 +365,8 @@ void ScriptInterpreterPython::ComputePyt
+   // x86_64, or bin on Windows).
+   llvm::sys::path::remove_filename(path);
+   llvm::sys::path::append(path, LLDB_PYTHON_RELATIVE_LIBDIR);
++  // remove double "lib/lib" statement
++  std::replace(path.begin(), path.end(), '/lib/lib/', '/lib/');
+ 
+ #if defined(_WIN32)
+   // This will be injected directly through FileSpec.GetDirectory().SetString(),

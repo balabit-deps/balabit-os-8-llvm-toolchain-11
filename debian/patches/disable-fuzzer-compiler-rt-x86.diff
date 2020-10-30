@@ -1,0 +1,32 @@
+Index: llvm-toolchain-snapshot_11~++20200418115741+8e0c5f72005/compiler-rt/lib/CMakeLists.txt
+===================================================================
+--- llvm-toolchain-snapshot_11~++20200418115741+8e0c5f72005.orig/compiler-rt/lib/CMakeLists.txt
++++ llvm-toolchain-snapshot_11~++20200418115741+8e0c5f72005/compiler-rt/lib/CMakeLists.txt
+@@ -57,7 +57,10 @@ if(COMPILER_RT_BUILD_XRAY)
+ endif()
+ 
+ if(COMPILER_RT_BUILD_LIBFUZZER)
+-  compiler_rt_build_runtime(fuzzer)
++  if(NOT(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "i386" OR CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "i686"))
++      # Disabled because of https://bugs.llvm.org/show_bug.cgi?id=43677
++      compiler_rt_build_runtime(fuzzer)
++    endif()
+ endif()
+ 
+ # It doesn't normally make sense to build runtimes when a sanitizer is enabled,
+Index: llvm-toolchain-snapshot_11~++20200418115741+8e0c5f72005/compiler-rt/test/CMakeLists.txt
+===================================================================
+--- llvm-toolchain-snapshot_11~++20200418115741+8e0c5f72005.orig/compiler-rt/test/CMakeLists.txt
++++ llvm-toolchain-snapshot_11~++20200418115741+8e0c5f72005/compiler-rt/test/CMakeLists.txt
+@@ -55,7 +55,10 @@ if(COMPILER_RT_CAN_EXECUTE_TESTS)
+ 
+     # OpenBSD not supporting asan, cannot run the tests
+     if(COMPILER_RT_BUILD_LIBFUZZER AND NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "OpenBSD" AND NOT ANDROID)
+-      compiler_rt_test_runtime(fuzzer)
++      if(NOT(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "i386" OR CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "i686"))
++        # Disabled because of https://bugs.llvm.org/show_bug.cgi?id=43677
++        compiler_rt_test_runtime(fuzzer)
++      endif()
+     endif()
+ 
+     foreach(sanitizer ${COMPILER_RT_SANITIZERS_TO_BUILD})

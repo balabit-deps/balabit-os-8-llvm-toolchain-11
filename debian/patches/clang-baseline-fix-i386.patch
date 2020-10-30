@@ -1,0 +1,15 @@
+Index: llvm-toolchain-11_11.0.0~+rc2/clang/lib/Driver/ToolChains/Arch/X86.cpp
+===================================================================
+--- llvm-toolchain-11_11.0.0~+rc2.orig/clang/lib/Driver/ToolChains/Arch/X86.cpp
++++ llvm-toolchain-11_11.0.0~+rc2/clang/lib/Driver/ToolChains/Arch/X86.cpp
+@@ -101,8 +101,8 @@ const char *x86::getX86TargetCPU(const A
+   case llvm::Triple::FreeBSD:
+     return "i686";
+   default:
+-    // Fallback to p4.
+-    return "pentium4";
++    // Fallback to i686.
++    return "i686";
+   }
+ }
+ 

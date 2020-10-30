@@ -1,0 +1,34 @@
+Index: llvm-toolchain-snapshot_11~++20200409051253+d08105482e1/clang/lib/Driver/ToolChains/Linux.cpp
+===================================================================
+--- llvm-toolchain-snapshot_11~++20200409051253+d08105482e1.orig/clang/lib/Driver/ToolChains/Linux.cpp
++++ llvm-toolchain-snapshot_11~++20200409051253+d08105482e1/clang/lib/Driver/ToolChains/Linux.cpp
+@@ -151,6 +151,10 @@ std::string Linux::getMultiarchTriple(co
+     if (D.getVFS().exists(SysRoot + "/lib/powerpc64le-linux-gnu"))
+       return "powerpc64le-linux-gnu";
+     break;
++  case llvm::Triple::riscv64:
++    if (D.getVFS().exists(SysRoot + "/lib/riscv64-linux-gnu"))
++      return "riscv64-linux-gnu";
++    break;
+   case llvm::Triple::sparc:
+     if (D.getVFS().exists(SysRoot + "/lib/sparc-linux-gnu"))
+       return "sparc-linux-gnu";
+@@ -761,6 +765,8 @@ void Linux::AddClangSystemIncludeArgs(co
+       "/usr/include/powerpc64-linux-gnu"};
+   const StringRef PPC64LEMultiarchIncludeDirs[] = {
+       "/usr/include/powerpc64le-linux-gnu"};
++  const StringRef RISCV64MultiarchIncludeDirs[] = {
++      "/usr/include/riscv64-linux-gnu"};
+   const StringRef SparcMultiarchIncludeDirs[] = {
+       "/usr/include/sparc-linux-gnu"};
+   const StringRef Sparc64MultiarchIncludeDirs[] = {
+@@ -836,6 +842,9 @@ void Linux::AddClangSystemIncludeArgs(co
+   case llvm::Triple::ppc64le:
+     MultiarchIncludeDirs = PPC64LEMultiarchIncludeDirs;
+     break;
++  case llvm::Triple::riscv64:
++    MultiarchIncludeDirs = RISCV64MultiarchIncludeDirs;
++    break;
+   case llvm::Triple::sparc:
+     MultiarchIncludeDirs = SparcMultiarchIncludeDirs;
+     break;

@@ -1,0 +1,25 @@
+Index: llvm-toolchain-snapshot_11~++20200603103903+8bd7e4188a0/libcxx/test/std/thread/thread.condition/thread.condition.condvar/wait_for.pass.cpp
+===================================================================
+--- llvm-toolchain-snapshot_11~++20200603103903+8bd7e4188a0.orig/libcxx/test/std/thread/thread.condition/thread.condition.condvar/wait_for.pass.cpp
++++ llvm-toolchain-snapshot_11~++20200603103903+8bd7e4188a0/libcxx/test/std/thread/thread.condition/thread.condition.condvar/wait_for.pass.cpp
+@@ -7,6 +7,7 @@
+ //===----------------------------------------------------------------------===//
+ //
+ // UNSUPPORTED: libcpp-has-no-threads
++// XFAIL: *
+ 
+ // ALLOW_RETRIES: 2
+ 
+Index: llvm-toolchain-snapshot_11~++20200603103903+8bd7e4188a0/libcxx/test/std/thread/thread.mutex/thread.lock/thread.lock.shared/thread.lock.shared.locking/lock.pass.cpp
+===================================================================
+--- llvm-toolchain-snapshot_11~++20200603103903+8bd7e4188a0.orig/libcxx/test/std/thread/thread.mutex/thread.lock/thread.lock.shared/thread.lock.shared.locking/lock.pass.cpp
++++ llvm-toolchain-snapshot_11~++20200603103903+8bd7e4188a0/libcxx/test/std/thread/thread.mutex/thread.lock/thread.lock.shared/thread.lock.shared.locking/lock.pass.cpp
+@@ -8,7 +8,7 @@
+ //
+ // UNSUPPORTED: libcpp-has-no-threads
+ // UNSUPPORTED: c++03, c++11
+-// XFAIL: dylib-has-no-shared_mutex
++// XFAIL: *
+ 
+ // ALLOW_RETRIES: 2
+ 

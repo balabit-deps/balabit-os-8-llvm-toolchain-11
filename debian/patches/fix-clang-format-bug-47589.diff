@@ -1,0 +1,13 @@
+Index: llvm-toolchain-11-11.0.0/clang/lib/Format/UnwrappedLineParser.cpp
+===================================================================
+--- llvm-toolchain-11-11.0.0.orig/clang/lib/Format/UnwrappedLineParser.cpp
++++ llvm-toolchain-11-11.0.0/clang/lib/Format/UnwrappedLineParser.cpp
+@@ -3062,7 +3062,7 @@ void UnwrappedLineParser::pushToken(Form
+   Line->Tokens.push_back(UnwrappedLineNode(Tok));
+   if (MustBreakBeforeNextToken) {
+     Line->Tokens.back().Tok->MustBreakBefore = true;
+-    Line->Tokens.back().Tok->MustBreakAlignBefore = true;
++//    Line->Tokens.back().Tok->MustBreakAlignBefore = true;
+     MustBreakBeforeNextToken = false;
+   }
+ }

@@ -1,0 +1,420 @@
+Description: PowerPC: Optimize SPE double parameter calling setup
+Author: Justin Hibbits <jrh29@alumni.cwru.edu>
+Origin: https://reviews.llvm.org/D54583
+Last-Update: 2019-02-14
+
+--- llvm-toolchain-snapshot-9~svn351420.orig/lib/Target/PowerPC/PPCCallingConv.td
++++ llvm-toolchain-snapshot-9~svn351420/lib/Target/PowerPC/PPCCallingConv.td
+@@ -90,7 +90,7 @@ def RetCC_PPC : CallingConv<[
+   CCIfSubtarget<"hasSPE()",
+        CCIfType<[f32], CCAssignToReg<[R3, R4, R5, R6, R7, R8, R9, R10]>>>,
+   CCIfSubtarget<"hasSPE()",
+-       CCIfType<[f64], CCAssignToReg<[S3, S4, S5, S6, S7, S8, S9, S10]>>>,
++       CCIfType<[f64], CCCustom<"CC_PPC32_SPE_RetF64">>>,
+ 
+   // For P9, f128 are passed in vector registers.
+   CCIfType<[f128],
+@@ -179,6 +179,9 @@ def CC_PPC32_SVR4_Common : CallingConv<[
+   CCIfType<[i32],
+   CCIfSplit<CCIfNotSubtarget<"useSoftFloat()", 
+                             CCCustom<"CC_PPC32_SVR4_Custom_AlignArgRegs">>>>,
++  CCIfType<[f64],
++  CCIfSubtarget<"hasSPE()",
++                CCCustom<"CC_PPC32_SVR4_Custom_AlignArgRegs">>>,
+   CCIfSplit<CCIfSubtarget<"useSoftFloat()",
+                           CCIfOrigArgWasPPCF128<CCCustom<
+                           "CC_PPC32_SVR4_Custom_SkipLastArgRegsPPCF128">>>>,
+@@ -199,7 +202,7 @@ def CC_PPC32_SVR4_Common : CallingConv<[
+                             CCAssignToReg<[F1, F2, F3, F4, F5, F6, F7, F8]>>>,
+   CCIfType<[f64],
+            CCIfSubtarget<"hasSPE()",
+-                         CCAssignToReg<[S3, S4, S5, S6, S7, S8, S9, S10]>>>,
++                         CCCustom<"CC_PPC32_SPE_CustomSplitFP64">>>,
+   CCIfType<[f32],
+            CCIfSubtarget<"hasSPE()",
+                          CCAssignToReg<[R3, R4, R5, R6, R7, R8, R9, R10]>>>,
+--- llvm-toolchain-snapshot-9~svn351420.orig/lib/Target/PowerPC/PPCISelLowering.cpp
++++ llvm-toolchain-snapshot-9~svn351420/lib/Target/PowerPC/PPCISelLowering.cpp
+@@ -1232,22 +1232,6 @@ unsigned PPCTargetLowering::getByValType
+   return Align;
+ }
+ 
+-unsigned PPCTargetLowering::getNumRegistersForCallingConv(LLVMContext &Context,
+-                                                          CallingConv:: ID CC,
+-                                                          EVT VT) const {
+-  if (Subtarget.hasSPE() && VT == MVT::f64)
+-    return 2;
+-  return PPCTargetLowering::getNumRegisters(Context, VT);
+-}
+-
+-MVT PPCTargetLowering::getRegisterTypeForCallingConv(LLVMContext &Context,
+-                                                     CallingConv:: ID CC,
+-                                                     EVT VT) const {
+-  if (Subtarget.hasSPE() && VT == MVT::f64)
+-    return MVT::i32;
+-  return PPCTargetLowering::getRegisterType(Context, VT);
+-}
+-
+ bool PPCTargetLowering::useSoftFloat() const {
+   return Subtarget.useSoftFloat();
+ }
+@@ -1365,6 +1349,8 @@ const char *PPCTargetLowering::getTarget
+   case PPCISD::QBFLT:           return "PPCISD::QBFLT";
+   case PPCISD::QVLFSb:          return "PPCISD::QVLFSb";
+   case PPCISD::BUILD_FP128:     return "PPCISD::BUILD_FP128";
++  case PPCISD::BUILD_SPE64:     return "PPCISD::BUILD_SPE64";
++  case PPCISD::EXTRACT_SPE:     return "PPCISD::EXTRACT_SPE";
+   case PPCISD::EXTSWSLI:        return "PPCISD::EXTSWSLI";
+   }
+   return nullptr;
+@@ -3162,6 +3148,58 @@ bool llvm::CC_PPC32_SVR4_Custom_Dummy(un
+   return true;
+ }
+ 
++bool llvm::CC_PPC32_SPE_CustomSplitFP64(unsigned &ValNo, MVT &ValVT,
++                                        MVT &LocVT,
++                                        CCValAssign::LocInfo &LocInfo,
++                                        ISD::ArgFlagsTy &ArgFlags,
++                                        CCState &State) {
++  static const MCPhysReg HiRegList[] = { PPC::R3, PPC::R5, PPC::R7, PPC::R9 };
++  static const MCPhysReg LoRegList[] = { PPC::R4, PPC::R6, PPC::R8, PPC::R10 };
++
++  // Try to get the first register.
++  unsigned Reg = State.AllocateReg(HiRegList);
++  if (!Reg)
++    return false;
++
++  unsigned i;
++  for (i = 0; i < sizeof(HiRegList) / sizeof(HiRegList[0]); ++i)
++    if (HiRegList[i] == Reg)
++      break;
++
++  unsigned T = State.AllocateReg(LoRegList[i]);
++  (void)T;
++  assert(T == LoRegList[i] && "Could not allocate register");
++
++  State.addLoc(CCValAssign::getCustomReg(ValNo, ValVT, Reg, LocVT, LocInfo));
++  State.addLoc(CCValAssign::getCustomReg(ValNo, ValVT, LoRegList[i],
++                                         LocVT, LocInfo));
++  return true;
++}
++
++bool llvm::CC_PPC32_SPE_RetF64(unsigned &ValNo, MVT &ValVT,
++                               MVT &LocVT,
++                               CCValAssign::LocInfo &LocInfo,
++                               ISD::ArgFlagsTy &ArgFlags,
++                               CCState &State) {
++  static const MCPhysReg HiRegList[] = { PPC::R3, PPC::R5, PPC::R7, PPC::R9 };
++  static const MCPhysReg LoRegList[] = { PPC::R4, PPC::R6, PPC::R8, PPC::R10 };
++
++  // Try to get the first register.
++  unsigned Reg = State.AllocateReg(HiRegList);
++  if (!Reg)
++    return false;
++
++  unsigned i;
++  for (i = 0; i < sizeof(HiRegList) / sizeof(HiRegList[0]); ++i)
++    if (HiRegList[i] == Reg)
++      break;
++
++  State.addLoc(CCValAssign::getCustomReg(ValNo, ValVT, Reg, LocVT, LocInfo));
++  State.addLoc(CCValAssign::getCustomReg(ValNo, ValVT, LoRegList[i],
++                                         LocVT, LocInfo));
++  return true;
++}
++
+ bool llvm::CC_PPC32_SVR4_Custom_AlignArgRegs(unsigned &ValNo, MVT &ValVT,
+                                              MVT &LocVT,
+                                              CCValAssign::LocInfo &LocInfo,
+@@ -3449,7 +3487,7 @@ SDValue PPCTargetLowering::LowerFormalAr
+   // Reserve space for the linkage area on the stack.
+   unsigned LinkageSize = Subtarget.getFrameLowering()->getLinkageSize();
+   CCInfo.AllocateStack(LinkageSize, PtrByteSize);
+-  if (useSoftFloat() || hasSPE())
++  if (useSoftFloat())
+     CCInfo.PreAnalyzeFormalArguments(Ins);
+ 
+   CCInfo.AnalyzeFormalArguments(Ins, CC_PPC32_SVR4);
+@@ -3482,7 +3520,8 @@ SDValue PPCTargetLowering::LowerFormalAr
+           if (Subtarget.hasVSX())
+             RC = &PPC::VSFRCRegClass;
+           else if (Subtarget.hasSPE())
+-            RC = &PPC::SPERCRegClass;
++            // SPE passes doubles in GPR pairs.
++            RC = &PPC::GPRCRegClass;
+           else
+             RC = &PPC::F8RCRegClass;
+           break;
+@@ -3506,13 +3545,30 @@ SDValue PPCTargetLowering::LowerFormalAr
+           break;
+       }
+ 
+-      // Transform the arguments stored in physical registers into virtual ones.
+-      unsigned Reg = MF.addLiveIn(VA.getLocReg(), RC);
+-      SDValue ArgValue = DAG.getCopyFromReg(Chain, dl, Reg,
+-                                            ValVT == MVT::i1 ? MVT::i32 : ValVT);
++      SDValue ArgValue;
++      if (VA.getLocVT() == MVT::f64 && Subtarget.hasSPE()) {
++        // Transform the arguments stored in physical registers into
++        // virtual ones.
++        unsigned Reg = MF.addLiveIn(VA.getLocReg(), RC);
++        ArgValue = DAG.getCopyFromReg(Chain, dl, Reg, MVT::i32);
++
++        SDValue ArgValue2;
++        Reg = MF.addLiveIn(ArgLocs[++i].getLocReg(), RC);
++        ArgValue2 = DAG.getCopyFromReg(Chain, dl, Reg, MVT::i32);
++        if (!Subtarget.isLittleEndian())
++          std::swap (ArgValue, ArgValue2);
++        ArgValue = DAG.getNode(PPCISD::BUILD_SPE64, dl, MVT::f64, ArgValue,
++                               ArgValue2);
++      } else {
+ 
+-      if (ValVT == MVT::i1)
+-        ArgValue = DAG.getNode(ISD::TRUNCATE, dl, MVT::i1, ArgValue);
++        // Transform the arguments stored in physical registers into
++        // virtual ones.
++        unsigned Reg = MF.addLiveIn(VA.getLocReg(), RC);
++        ArgValue = DAG.getCopyFromReg(Chain, dl, Reg,
++                                      ValVT == MVT::i1 ? MVT::i32 : ValVT);
++        if (ValVT == MVT::i1)
++          ArgValue = DAG.getNode(ISD::TRUNCATE, dl, MVT::i1, ArgValue);
++      }
+ 
+       InVals.push_back(ArgValue);
+     } else {
+@@ -5129,10 +5185,27 @@ SDValue PPCTargetLowering::LowerCallResu
+     CCValAssign &VA = RVLocs[i];
+     assert(VA.isRegLoc() && "Can only return in registers!");
+ 
+-    SDValue Val = DAG.getCopyFromReg(Chain, dl,
+-                                     VA.getLocReg(), VA.getLocVT(), InFlag);
+-    Chain = Val.getValue(1);
+-    InFlag = Val.getValue(2);
++    SDValue Val;
++
++    if (Subtarget.hasSPE() && VA.getLocVT() == MVT::f64) {
++      SDValue Lo = DAG.getCopyFromReg(Chain, dl, VA.getLocReg(), MVT::i32,
++                                      InFlag);
++      Chain = Lo.getValue(1);
++      InFlag = Lo.getValue(2);
++      VA = RVLocs[++i]; // skip ahead to next loc
++      SDValue Hi = DAG.getCopyFromReg(Chain, dl, VA.getLocReg(), MVT::i32,
++                                      InFlag);
++      Chain = Hi.getValue(1);
++      InFlag = Hi.getValue(2);
++      if (!Subtarget.isLittleEndian())
++        std::swap (Lo, Hi);
++      Val = DAG.getNode(PPCISD::BUILD_SPE64, dl, MVT::f64, Lo, Hi);
++    } else {
++      Val = DAG.getCopyFromReg(Chain, dl,
++                               VA.getLocReg(), VA.getLocVT(), InFlag);
++      Chain = Val.getValue(1);
++      InFlag = Val.getValue(2);
++    }
+ 
+     switch (VA.getLocInfo()) {
+     default: llvm_unreachable("Unknown loc info!");
+@@ -5444,12 +5517,12 @@ SDValue PPCTargetLowering::LowerCall_32S
+ 
+   bool seenFloatArg = false;
+   // Walk the register/memloc assignments, inserting copies/loads.
+-  for (unsigned i = 0, j = 0, e = ArgLocs.size();
++  for (unsigned i = 0, realI = 0, j = 0, e = ArgLocs.size();
+        i != e;
+-       ++i) {
++       ++i, ++realI) {
+     CCValAssign &VA = ArgLocs[i];
+-    SDValue Arg = OutVals[i];
+-    ISD::ArgFlagsTy Flags = Outs[i].Flags;
++    SDValue Arg = OutVals[realI];
++    ISD::ArgFlagsTy Flags = Outs[realI].Flags;
+ 
+     if (Flags.isByVal()) {
+       // Argument is an aggregate which is passed by value, thus we need to
+@@ -5498,7 +5571,18 @@ SDValue PPCTargetLowering::LowerCall_32S
+     if (VA.isRegLoc()) {
+       seenFloatArg |= VA.getLocVT().isFloatingPoint();
+       // Put argument in a physical register.
+-      RegsToPass.push_back(std::make_pair(VA.getLocReg(), Arg));
++      if (Subtarget.hasSPE() && Arg.getValueType() == MVT::f64) {
++        unsigned id = Subtarget.isLittleEndian() ? 0 : 1;
++        SDValue SVal = DAG.getNode(PPCISD::EXTRACT_SPE, dl, MVT::i32, Arg,
++                                   DAG.getIntPtrConstant(id, dl));
++        RegsToPass.push_back(std::make_pair(VA.getLocReg(), SVal.getValue(0)));
++        SVal = DAG.getNode(PPCISD::EXTRACT_SPE, dl, MVT::i32, Arg,
++                           DAG.getIntPtrConstant(1 - id, dl));
++
++        RegsToPass.push_back(std::make_pair(ArgLocs[++i].getLocReg(),
++                             SVal.getValue(0)));
++      } else
++        RegsToPass.push_back(std::make_pair(VA.getLocReg(), Arg));
+     } else {
+       // Put argument in the parameter list area of the current stack frame.
+       assert(VA.isMemLoc());
+@@ -6644,11 +6728,11 @@ PPCTargetLowering::LowerReturn(SDValue C
+   SmallVector<SDValue, 4> RetOps(1, Chain);
+ 
+   // Copy the result values into the output registers.
+-  for (unsigned i = 0; i != RVLocs.size(); ++i) {
++  for (unsigned i = 0, realI = 0; i != RVLocs.size(); ++i, ++realI) {
+     CCValAssign &VA = RVLocs[i];
+     assert(VA.isRegLoc() && "Can only return in registers!");
+ 
+-    SDValue Arg = OutVals[i];
++    SDValue Arg = OutVals[realI];
+ 
+     switch (VA.getLocInfo()) {
+     default: llvm_unreachable("Unknown loc info!");
+@@ -6663,8 +6747,21 @@ PPCTargetLowering::LowerReturn(SDValue C
+       Arg = DAG.getNode(ISD::SIGN_EXTEND, dl, VA.getLocVT(), Arg);
+       break;
+     }
+-
+-    Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), Arg, Flag);
++    if (Subtarget.hasSPE() && VA.getLocVT() == MVT::f64) {
++      bool isLittleEndian = Subtarget.isLittleEndian();
++      // Legalize ret f64 -> ret 2 x i32.
++      SDValue SVal =
++          DAG.getNode(PPCISD::EXTRACT_SPE, dl, MVT::i32, Arg,
++                      DAG.getIntPtrConstant(isLittleEndian ? 0 : 1, dl));
++      Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), SVal, Flag);
++      RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
++      SVal = DAG.getNode(PPCISD::EXTRACT_SPE, dl, MVT::i32, Arg,
++                         DAG.getIntPtrConstant(isLittleEndian ? 1 : 0, dl));
++      Flag = Chain.getValue(1);
++      VA = RVLocs[++i]; // skip ahead to next loc
++      Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), SVal, Flag);
++    } else
++      Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), Arg, Flag);
+     Flag = Chain.getValue(1);
+     RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
+   }
+--- llvm-toolchain-snapshot-9~svn351420.orig/lib/Target/PowerPC/PPCISelLowering.h
++++ llvm-toolchain-snapshot-9~svn351420/lib/Target/PowerPC/PPCISelLowering.h
+@@ -196,6 +196,15 @@ namespace llvm {
+       /// Direct move of 2 consective GPR to a VSX register.
+       BUILD_FP128,
+ 
++      /// BUILD_SPE64 and EXTRACT_SPE are analogous to BUILD_PAIR and
++      /// EXTRACT_ELEMENT but take f64 arguments instead of i64, as i64 is
++      /// unsupported for this target.
++      /// Merge 2 GPRs to a single SPE register.
++      BUILD_SPE64,
++
++      /// Extract SPE register component, second argument is high or low.
++      EXTRACT_SPE,
++
+       /// Extract a subvector from signed integer vector and convert to FP.
+       /// It is primarily used to convert a (widened) illegal integer vector
+       /// type to a legal floating point vector type.
+@@ -898,14 +907,6 @@ namespace llvm {
+                                                unsigned JTI,
+                                                MCContext &Ctx) const override;
+ 
+-    unsigned getNumRegistersForCallingConv(LLVMContext &Context,
+-                                           CallingConv:: ID CC,
+-                                           EVT VT) const override;
+-
+-    MVT getRegisterTypeForCallingConv(LLVMContext &Context,
+-                                      CallingConv:: ID CC,
+-                                      EVT VT) const override;
+-
+   private:
+     struct ReuseLoadInfo {
+       SDValue Ptr;
+@@ -1110,6 +1111,7 @@ namespace llvm {
+     SDValue lowerEH_SJLJ_SETJMP(SDValue Op, SelectionDAG &DAG) const;
+     SDValue lowerEH_SJLJ_LONGJMP(SDValue Op, SelectionDAG &DAG) const;
+     SDValue LowerBITCAST(SDValue Op, SelectionDAG &DAG) const;
++    SDValue LowerEXTRACT_ELEMENT(SDValue Op, SelectionDAG &DAG) const;
+ 
+     SDValue DAGCombineExtBoolTrunc(SDNode *N, DAGCombinerInfo &DCI) const;
+     SDValue DAGCombineBuildVector(SDNode *N, DAGCombinerInfo &DCI) const;
+@@ -1187,6 +1189,17 @@ namespace llvm {
+                                                  ISD::ArgFlagsTy &ArgFlags,
+                                                  CCState &State);
+ 
++  bool CC_PPC32_SPE_CustomSplitFP64(unsigned &ValNo, MVT &ValVT,
++                                    MVT &LocVT,
++                                    CCValAssign::LocInfo &LocInfo,
++                                    ISD::ArgFlagsTy &ArgFlags,
++                                    CCState &State);
++  bool CC_PPC32_SPE_RetF64(unsigned &ValNo, MVT &ValVT,
++                           MVT &LocVT,
++                           CCValAssign::LocInfo &LocInfo,
++                           ISD::ArgFlagsTy &ArgFlags,
++                           CCState &State);
++
+   bool CC_PPC32_SVR4_Custom_AlignFPArgRegs(unsigned &ValNo, MVT &ValVT,
+                                            MVT &LocVT,
+                                            CCValAssign::LocInfo &LocInfo,
+--- llvm-toolchain-snapshot-9~svn351420.orig/lib/Target/PowerPC/PPCInstrInfo.td
++++ llvm-toolchain-snapshot-9~svn351420/lib/Target/PowerPC/PPCInstrInfo.td
+@@ -231,6 +231,17 @@ def PPCbuild_fp128: SDNode<"PPCISD::BUIL
+                               SDTCisSameAs<1,2>]>,
+                            []>;
+ 
++def PPCbuild_spe64: SDNode<"PPCISD::BUILD_SPE64",
++                           SDTypeProfile<1, 2,
++                             [SDTCisFP<0>, SDTCisSameSizeAs<1,2>,
++                              SDTCisSameAs<1,2>]>,
++                           []>;
++
++def PPCextract_spe : SDNode<"PPCISD::EXTRACT_SPE",
++                            SDTypeProfile<1, 2,
++                              [SDTCisInt<0>, SDTCisFP<1>, SDTCisPtrTy<2>]>,
++                              []>;
++
+ // These are target-independent nodes, but have target-specific formats.
+ def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_PPCCallSeqStart,
+                            [SDNPHasChain, SDNPOutGlue]>;
+--- llvm-toolchain-snapshot-9~svn351420.orig/lib/Target/PowerPC/PPCInstrSPE.td
++++ llvm-toolchain-snapshot-9~svn351420/lib/Target/PowerPC/PPCInstrSPE.td
+@@ -512,7 +512,7 @@ def EVLWWSPLATX    : EVXForm_1<792, (out
+ 
+ def EVMERGEHI      : EVXForm_1<556, (outs sperc:$RT), (ins sperc:$RA, sperc:$RB),
+                                "evmergehi $RT, $RA, $RB", IIC_VecGeneral, []>;
+-def EVMERGELO      : EVXForm_1<557, (outs sperc:$RT), (ins sperc:$RA, sperc:$RB),
++def EVMERGELO      : EVXForm_1<557, (outs sperc:$RT), (ins gprc:$RA, gprc:$RB),
+                                "evmergelo $RT, $RA, $RB", IIC_VecGeneral, []>;
+ def EVMERGEHILO    : EVXForm_1<558, (outs sperc:$RT), (ins sperc:$RA, sperc:$RB),
+                                "evmergehilo $RT, $RA, $RB", IIC_VecGeneral, []>;
+@@ -887,4 +887,14 @@ def : Pat<(f64 (selectcc i1:$lhs, i1:$rh
+           (SELECT_SPE (CRANDC $lhs, $rhs), $tval, $fval)>;
+ def : Pat<(f64 (selectcc i1:$lhs, i1:$rhs, f64:$tval, f64:$fval, SETNE)),
+           (SELECT_SPE (CRXOR $lhs, $rhs), $tval, $fval)>;
++
++
++def : Pat<(f64 (PPCbuild_spe64 i32:$rB, i32:$rA)),
++          (f64 (COPY_TO_REGCLASS (EVMERGELO $rA, $rB), SPERC))>;
++
++def : Pat<(i32 (PPCextract_spe f64:$rA, 1)),
++          (i32 (EXTRACT_SUBREG (EVMERGEHI $rA, $rA), sub_32))>;
++def : Pat<(i32 (PPCextract_spe f64:$rA, 0)),
++          (i32 (EXTRACT_SUBREG $rA, sub_32))>;
++
+ }
+--- llvm-toolchain-snapshot-9~svn351420.orig/test/CodeGen/PowerPC/spe.ll
++++ llvm-toolchain-snapshot-9~svn351420/test/CodeGen/PowerPC/spe.ll
+@@ -472,10 +472,8 @@ entry:
+ ; CHECK-LABEL: test_dselect
+ ; CHECK: andi.
+ ; CHECK: bc
+-; CHECK: evldd
+-; CHECK: b
+-; CHECK: evldd
+-; CHECK: evstdd
++; CHECK: evor
++; CHECK: evmergehi
+ ; CHECK: blr
+ }
+ 
+@@ -519,7 +517,7 @@ entry:
+   %1 = call i32 asm sideeffect "efdctsi $0, $1", "=d,d"(double %0)
+   ret i32 %1
+ ; CHECK-LABEL: test_dasmconst
+-; CHECK: evldd
++; CHECK: evmergelo
+ ; CHECK: #APP
+ ; CHECK: efdctsi
+ ; CHECK: #NO_APP

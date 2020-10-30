@@ -1,0 +1,13 @@
+Index: llvm-toolchain-snapshot_11~++20200326111000+4673699a470/compiler-rt/lib/xray/xray_tsc.h
+===================================================================
+--- llvm-toolchain-snapshot_11~++20200326111000+4673699a470.orig/compiler-rt/lib/xray/xray_tsc.h
++++ llvm-toolchain-snapshot_11~++20200326111000+4673699a470/compiler-rt/lib/xray/xray_tsc.h
+@@ -82,8 +82,6 @@ inline uint64_t getTSCFrequency() XRAY_N
+ 
+ } // namespace __xray
+ 
+-#else
+-#error Target architecture is not supported.
+ #endif // CPU architecture
+ #endif // SANITIZER_FUCHSIA
+ 

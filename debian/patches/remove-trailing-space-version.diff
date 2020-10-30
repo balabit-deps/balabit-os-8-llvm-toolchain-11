@@ -1,0 +1,34 @@
+Index: llvm-toolchain-10_10.0.1~+rc1/clang/lib/Basic/Version.cpp
+===================================================================
+--- llvm-toolchain-10_10.0.1~+rc1.orig/clang/lib/Basic/Version.cpp
++++ llvm-toolchain-10_10.0.1~+rc1/clang/lib/Basic/Version.cpp
+@@ -125,8 +125,12 @@ std::string getClangToolFullVersion(Stri
+ #ifdef CLANG_VENDOR
+   OS << CLANG_VENDOR;
+ #endif
+-  OS << ToolName << " version " CLANG_VERSION_STRING "-" DEB_PATCHSETVERSION " "
+-     << getClangFullRepositoryVersion();
++  OS << ToolName << " version " CLANG_VERSION_STRING "-" DEB_PATCHSETVERSION;
++
++  std::string repo = getClangFullRepositoryVersion();
++  if (!repo.empty()) {
++    OS << " " << repo;
++  }
+ 
+   return OS.str();
+ }
+@@ -139,7 +143,13 @@ std::string getClangFullCPPVersion() {
+ #ifdef CLANG_VENDOR
+   OS << CLANG_VENDOR;
+ #endif
+-  OS << "Clang " CLANG_VERSION_STRING " " << getClangFullRepositoryVersion();
++  OS << "Clang " CLANG_VERSION_STRING;
++
++  std::string repo = getClangFullRepositoryVersion();
++  if (!repo.empty()) {
++    OS << " " << repo;
++  }
++
+   return OS.str();
+ }
+ 

@@ -1,0 +1,23 @@
+Index: llvm-toolchain-snapshot_11~++20200326111000+4673699a470/lldb/tools/argdumper/CMakeLists.txt
+===================================================================
+--- llvm-toolchain-snapshot_11~++20200326111000+4673699a470.orig/lldb/tools/argdumper/CMakeLists.txt
++++ llvm-toolchain-snapshot_11~++20200326111000+4673699a470/lldb/tools/argdumper/CMakeLists.txt
+@@ -4,3 +4,6 @@ add_lldb_tool(lldb-argdumper ADD_TO_FRAM
+   LINK_COMPONENTS
+     Support
+ )
++
++install(TARGETS lldb-argdumper
++  RUNTIME DESTINATION bin)
+Index: llvm-toolchain-snapshot_11~++20200326111000+4673699a470/lldb/tools/lldb-server/CMakeLists.txt
+===================================================================
+--- llvm-toolchain-snapshot_11~++20200326111000+4673699a470.orig/lldb/tools/lldb-server/CMakeLists.txt
++++ llvm-toolchain-snapshot_11~++20200326111000+4673699a470/lldb/tools/lldb-server/CMakeLists.txt
+@@ -52,3 +52,7 @@ add_lldb_tool(lldb-server
+ 
+ target_include_directories(lldb-server PRIVATE "${LLDB_SOURCE_DIR}/source")
+ target_link_libraries(lldb-server PRIVATE ${LLDB_SYSTEM_LIBS})
++
++install(TARGETS lldb-server
++  RUNTIME DESTINATION bin)
++
